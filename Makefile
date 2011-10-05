@@ -3,7 +3,7 @@ all:	temper
 CFLAGS = -O2 -Wall
 
 temper:	temper.c temper.h
-	${CC} -DUNIT_TEST -o $@ $^ -lusb
+	${CC} -DUNIT_TEST -o $@ $^ -lusb -lm
 
 clean:		
 	rm -f temper *.o

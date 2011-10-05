@@ -2,6 +2,7 @@
 #include <string.h>
 #include <usb.h>
 #include <errno.h>
+#include <math.h>
 
 /*
  * Temper.c by Robert Kavaler (c) 2009 (relavak.com)
@@ -192,10 +193,11 @@ TemperGetData(Temper *t, char *buf, int len)
 }
 
 int
-TemperGetTempAndRelHum(Temper *t, float *tempC, float *relhum)
+TemperGetTempAndRelHum(Temper *t, double *tempC, double *relhum)
 {
 	char buf[256];
 	int ret, temperature, rh, i;
+	double temp_hum;
 
 	TemperSendCommand(t, 10, 11, 12, 13, 0, 0, 2, 0);
 	TemperSendCommand(t, 0x48, 0, 0, 0, 0, 0, 0, 0);
@@ -228,7 +230,8 @@ TemperGetTempAndRelHum(Temper *t, float *tempC, float *relhum)
 	*tempC = -39.7 + .01*temperature;
 
 	rh = (buf[3] & 0xFF) + ((buf[2] & 0xFF) << 8);
-	*relhum = 2.0468 + 0.0367*rh - 1.5955e-6*rh*rh;
+	temp_hum = -2.0468 + 0.0367*rh - 1.5955e-6*rh*rh;
+	*relhum = (*tempC-25)*(.01 + .00008 * rh) + temp_hum;
 
 	return 0;
 }
@@ -281,15 +284,28 @@ main(void)
 	  printf("\n");
 	}
 
-	float tempc;
-	float rh;
+	double tempc;
+	double rh;
 
 	if(TemperGetTempAndRelHum(t, &tempc, &rh) < 0) {
 	  perror("TemperGetTemperatureAndRelHum");
 	  exit(1);
 	}
 	/* printf("Temperature: %.2f°F, %.2f°C\tRelative humidity: %.2f%%\n", (9.0 / 5.0 * tempc + 32.0), tempc, rh); */
-	printf("%.2f %.2f\n", tempc, rh);
+	double dew, tn, m;
+	if (tempc > 0)
+	{
+		tn = 243.12;
+		m = 17.62;
+	}
+	else
+	{
+		tn = 272.62;
+		m = 22.46;
+	}
+	dew = tn * (log(rh/100)+(m*tempc/(tn+tempc))) / (m - log(rh/100) - (m*tempc/(tn+tempc)));
+
+	printf("%.2f %.2f %.2f\n", tempc, rh, dew);
 
 	return 0;
 }
