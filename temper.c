@@ -18,7 +18,7 @@
  *     * Redistributions of source code must retain the above
  *       copyright notice, this list of conditions and the following
  *       disclaimer.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY Robert Kavaler ''AS IS'' AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
@@ -31,7 +31,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
  * USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
- * 
+ *
  */
 
 #include "temper.h"
@@ -44,6 +44,7 @@ struct Temper {
 	usb_dev_handle *handle;
 	int debug;
 	int timeout;
+	int sensorType;
 };
 
 Temper *
@@ -174,6 +175,17 @@ TemperSendCommand(Temper *t, int a, int b, int c, int d, int e, int f, int g, in
 		       a, b, c, d, e, f, g, h);
 	}
 
+/*
+		/* No interrput out endpoint. Use the Control Endpoint * /
+		res = libusb_control_transfer(dev->device_handle,
+			LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
+			0x09/*HID Set_Report* /,
+			(2/*HID output* / << 8) | report_number,
+			dev->interface,
+			(unsigned char *)data, length,
+			1000/*timeout millis* /);
+*/
+	// hidapi: hid_write report 0, extra 0 byte for report_number so 33
 	ret = usb_control_msg(t->handle, 0x21, 9, 0x200, 0x01,
 			    (char *) buf, 32, t->timeout);
 	if(ret != 32) {
@@ -187,7 +199,16 @@ static int
 TemperGetData(Temper *t, char *buf, int len)
 {
 	int ret;
-
+/*
+	res = libusb_control_transfer(dev->device_handle,
+		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_IN,
+		0x01/*HID get_report* /,
+		(3/*HID feature* / << 8) | report_number,
+		dev->interface,
+		(unsigned char *)data, length,
+		1000/*timeout millis* /);
+*/
+	// hidapi: hid_get_feature_report 0, 257 (extra byte for report_number
 	return usb_control_msg(t->handle, 0xa1, 1, 0x300, 0x01,
 			    (char *) buf, len, t->timeout);
 }
@@ -200,7 +221,12 @@ TemperGetTempAndRelHum(Temper *t, double *tempC, double *relhum)
 	double temp_hum;
 
 	TemperSendCommand(t, 10, 11, 12, 13, 0, 0, 2, 0);
+	if (t->sensorType == 0x58) {
+		TemperSendCommand(t, 0x54, 0, 0, 0, 0, 0, 0, 0);
+	}
+	else {
 	TemperSendCommand(t, 0x48, 0, 0, 0, 0, 0, 0, 0);
+	}
 	for(i = 0; i < 7; i++) {
 		TemperSendCommand(t, 0, 0, 0, 0, 0, 0, 0, 0);
 	}
@@ -226,8 +252,13 @@ TemperGetTempAndRelHum(Temper *t, double *tempC, double *relhum)
 
 	/* Numerical constants below come from the Sensirion SHT1x
 	datasheet (Table 9 for temperature and Table 6 for humidity */
-	temperature = (buf[1] & 0xFF) + (buf[0] << 8);	
-	*tempC = -39.7 + .01*temperature;
+	temperature = (buf[1] & 0xFF) + (buf[0] << 8);
+	if (t->sensorType == 0x58) {
+		*tempC = temperature * 125.0 / 32000.0; // RKR FM75
+	}
+	else {
+		*tempC = -39.7 + .01*temperature;
+	}
 
 	rh = (buf[3] & 0xFF) + ((buf[2] & 0xFF) << 8);
 	temp_hum = -2.0468 + 0.0367*rh - 1.5955e-6*rh*rh;
@@ -273,6 +304,9 @@ main(void)
 
 	bzero(buf, 256);
 	ret = TemperGetOtherStuff(t, buf, 256);
+	if (ret >= 2) {
+		t->sensorType = buf[1];
+    }
 	if(t->debug) {
 	  printf("Other Stuff (%d bytes):\n", ret);
 	  for(i = 0; i < ret; i++) {
